@@ -1,0 +1,134 @@
+{
+    "food": [
+        "groceries",
+        "dining_out",
+        "coffee_tea",
+        "delivery_fees",
+        "snacks",
+        "alcohol",
+        "other"
+    ],
+    "transport": [
+        "fuel",
+        "public_transport",
+        "cab_ride_hailing",
+        "parking",
+        "tolls",
+        "vehicle_service",
+        "other"
+    ],
+    "housing": [
+        "rent",
+        "maintenance_hoa",
+        "property_tax",
+        "repairs",
+        "furnishing",
+        "cleaning_supplies",
+        "other"
+    ],
+    "utilities": [
+        "electricity",
+        "water",
+        "gas",
+        "internet",
+        "mobile_phone",
+        "waste_sanitation",
+        "other"
+    ],
+    "health": [
+        "doctor_consultation",
+        "medicines",
+        "diagnostics_labs",
+        "health_insurance",
+        "fitness_gym",
+        "dental_vision",
+        "other"
+    ],
+    "education": [
+        "tuition_fees",
+        "books_courses",
+        "online_courses",
+        "exam_fees",
+        "stationery",
+        "workshops",
+        "other"
+    ],
+    "family_kids": [
+        "school_fees",
+        "childcare",
+        "toys_games",
+        "kids_clothing",
+        "activities_classes",
+        "family_support",
+        "other"
+    ],
+    "entertainment": [
+        "movies_events",
+        "streaming",
+        "games",
+        "hobbies",
+        "outings",
+        "other"
+    ],
+    "shopping": [
+        "clothing",
+        "footwear",
+        "accessories",
+        "electronics",
+        "home_decor",
+        "gadgets",
+        "other"
+    ],
+    "subscriptions": [
+        "software_saas",
+        "cloud_storage",
+        "news_magazines",
+        "music_video",
+        "memberships",
+        "other"
+    ],
+    "personal_care": [
+        "salon_barber",
+        "skincare",
+        "cosmetics",
+        "spa_wellness",
+        "other"
+    ],
+    "gifts_donations": [
+        "gifts",
+        "charity",
+        "festivals",
+        "weddings_events",
+        "other"
+    ],
+    "finance_fees": [
+        "bank_fees",
+        "loan_emi",
+        "credit_card_interest",
+        "insurance_premium",
+        "taxes",
+        "investments",
+        "other"
+    ],
+    "travel": [
+        "flights",
+        "trains_buses",
+        "hotels",
+        "local_transport",
+        "visa_passport",
+        "travel_insurance",
+        "other"
+    ],
+    "business": [
+        "software_tools",
+        "equipment",
+        "marketing",
+        "travel_business",
+        "office_supplies",
+        "other"
+    ],
+    "misc": [
+        "uncategorized",
+        "other"
+    ]
+}
