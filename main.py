@@ -1,6 +1,7 @@
 from fastmcp import FastMCP
 import os
-import sqlite3
+import asyncio
+import aiosqlite
 
 
 # ============================================================
@@ -9,10 +10,8 @@ import sqlite3
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# /app is the application directory in Horizon and should not
-# be used for SQLite write operations.
-#
-# /tmp is writable by the running container.
+# Horizon's /app directory should not be used for SQLite writes.
+# /tmp is writable in the current deployment environment.
 DB_PATH = "/tmp/expense.db"
 
 CATEGORIES_PATH = os.path.join(
@@ -29,35 +28,37 @@ mcp = FastMCP(name="ExpenseTracker")
 
 
 # ============================================================
-# DATABASE CONNECTION
-# ============================================================
-
-def get_connection():
-    """
-    Creates a read/write SQLite connection.
-
-    The database is stored in /tmp because the application
-    directory (/app) is not writable in the Horizon container.
-    """
-
-    return sqlite3.connect(
-        DB_PATH,
-        timeout=10
-    )
-
-
-# ============================================================
 # DATABASE INITIALIZATION
 # ============================================================
 
-def init_db():
+async def init_db():
     """
-    Creates the expenses table if it does not already exist.
+    Initializes the SQLite database.
+
+    aiosqlite is used so database operations are asynchronous.
+    WAL mode improves concurrent read/write behavior.
     """
 
-    with get_connection() as conn:
+    async with aiosqlite.connect(
+        DB_PATH,
+        timeout=10
+    ) as db:
 
-        conn.execute("""
+        # Enable WAL for better concurrent access.
+        await db.execute(
+            "PRAGMA journal_mode=WAL;"
+        )
+
+        # Wait for a busy database instead of immediately failing.
+        await db.execute(
+            "PRAGMA busy_timeout=10000;"
+        )
+
+        await db.execute(
+            "PRAGMA foreign_keys=ON;"
+        )
+
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS expenses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 date TEXT NOT NULL,
@@ -68,11 +69,7 @@ def init_db():
             )
         """)
 
-        conn.commit()
-
-
-# Initialize database when the MCP server starts
-init_db()
+        await db.commit()
 
 
 # ============================================================
@@ -80,7 +77,7 @@ init_db()
 # ============================================================
 
 @mcp.tool
-def add_expense(
+async def add_expense(
     date: str,
     amount: float,
     category: str,
@@ -89,13 +86,22 @@ def add_expense(
 ):
     """
     Adds a new expense to the database.
+
+    This function is asynchronous and uses aiosqlite.
     """
 
     try:
 
-        with get_connection() as conn:
+        async with aiosqlite.connect(
+            DB_PATH,
+            timeout=10
+        ) as db:
 
-            cursor = conn.execute(
+            await db.execute(
+                "PRAGMA busy_timeout=10000;"
+            )
+
+            cursor = await db.execute(
                 """
                 INSERT INTO expenses
                 (
@@ -116,25 +122,28 @@ def add_expense(
                 )
             )
 
-            conn.commit()
+            await db.commit()
 
-            return {
-                "status": "success",
-                "message": "Expense added successfully",
-                "id": cursor.lastrowid,
-                "date": date,
-                "amount": amount,
-                "category": category,
-                "subcategory": subcategory,
-                "description": description
-            }
+            expense_id = cursor.lastrowid
 
-    except sqlite3.Error as e:
+            await cursor.close()
+
+        return {
+            "status": "success",
+            "message": "Expense added successfully",
+            "id": expense_id,
+            "date": date,
+            "amount": amount,
+            "category": category,
+            "subcategory": subcategory,
+            "description": description
+        }
+
+    except Exception as e:
 
         return {
             "status": "error",
-            "message": f"Database error: {str(e)}",
-            "database_path": DB_PATH
+            "message": str(e)
         }
 
 
@@ -143,16 +152,25 @@ def add_expense(
 # ============================================================
 
 @mcp.tool
-def list_expenses():
+async def list_expenses():
     """
-    Lists all expense entries from the database.
+    Lists all expense entries.
     """
 
     try:
 
-        with get_connection() as conn:
+        async with aiosqlite.connect(
+            DB_PATH,
+            timeout=10
+        ) as db:
 
-            cursor = conn.execute("""
+            await db.execute(
+                "PRAGMA busy_timeout=10000;"
+            )
+
+            db.row_factory = aiosqlite.Row
+
+            cursor = await db.execute("""
                 SELECT
                     id,
                     date,
@@ -164,48 +182,53 @@ def list_expenses():
                 ORDER BY date DESC, id DESC
             """)
 
-            columns = [
-                column[0]
-                for column in cursor.description
-            ]
+            rows = await cursor.fetchall()
 
-            rows = cursor.fetchall()
+            await cursor.close()
 
             return [
-                dict(zip(columns, row))
+                dict(row)
                 for row in rows
             ]
 
-    except sqlite3.Error as e:
+    except Exception as e:
 
         return {
             "status": "error",
-            "message": f"Database error: {str(e)}"
+            "message": str(e)
         }
 
 
 # ============================================================
-# LIST EXPENSES BETWEEN TWO DATES
+# LIST EXPENSES BY DATE RANGE
 # ============================================================
 
 @mcp.tool
-def list_expenses_till_date(
+async def list_expenses_till_date(
     start_date: str,
     end_date: str
 ):
     """
-    Lists expenses between start_date and end_date.
-    Both dates are inclusive.
+    Lists expenses between two dates.
 
-    Expected format:
-    YYYY-MM-DD
+    Both dates are inclusive.
+    Expected format: YYYY-MM-DD
     """
 
     try:
 
-        with get_connection() as conn:
+        async with aiosqlite.connect(
+            DB_PATH,
+            timeout=10
+        ) as db:
 
-            cursor = conn.execute(
+            await db.execute(
+                "PRAGMA busy_timeout=10000;"
+            )
+
+            db.row_factory = aiosqlite.Row
+
+            cursor = await db.execute(
                 """
                 SELECT
                     id,
@@ -224,23 +247,20 @@ def list_expenses_till_date(
                 )
             )
 
-            columns = [
-                column[0]
-                for column in cursor.description
-            ]
+            rows = await cursor.fetchall()
 
-            rows = cursor.fetchall()
+            await cursor.close()
 
             return [
-                dict(zip(columns, row))
+                dict(row)
                 for row in rows
             ]
 
-    except sqlite3.Error as e:
+    except Exception as e:
 
         return {
             "status": "error",
-            "message": f"Database error: {str(e)}"
+            "message": str(e)
         }
 
 
@@ -249,7 +269,7 @@ def list_expenses_till_date(
 # ============================================================
 
 @mcp.tool
-def summarise(
+async def summarise(
     start_date: str,
     end_date: str,
     category: str = None
@@ -287,30 +307,36 @@ def summarise(
             ORDER BY category ASC
         """
 
-        with get_connection() as conn:
+        async with aiosqlite.connect(
+            DB_PATH,
+            timeout=10
+        ) as db:
 
-            cursor = conn.execute(
+            await db.execute(
+                "PRAGMA busy_timeout=10000;"
+            )
+
+            db.row_factory = aiosqlite.Row
+
+            cursor = await db.execute(
                 query,
                 params
             )
 
-            columns = [
-                column[0]
-                for column in cursor.description
-            ]
+            rows = await cursor.fetchall()
 
-            rows = cursor.fetchall()
+            await cursor.close()
 
             return [
-                dict(zip(columns, row))
+                dict(row)
                 for row in rows
             ]
 
-    except sqlite3.Error as e:
+    except Exception as e:
 
         return {
             "status": "error",
-            "message": f"Database error: {str(e)}"
+            "message": str(e)
         }
 
 
@@ -319,7 +345,7 @@ def summarise(
 # ============================================================
 
 @mcp.tool
-def delete_all_expenses(
+async def delete_all_expenses(
     confirm: bool = False
 ):
     """
@@ -337,23 +363,31 @@ def delete_all_expenses(
 
     try:
 
-        with get_connection() as conn:
+        async with aiosqlite.connect(
+            DB_PATH,
+            timeout=10
+        ) as db:
 
-            cursor = conn.execute(
+            await db.execute(
+                "PRAGMA busy_timeout=10000;"
+            )
+
+            cursor = await db.execute(
                 "DELETE FROM expenses"
             )
 
             deleted_count = cursor.rowcount
 
-            # Reset AUTOINCREMENT sequence
-            conn.execute(
+            await db.execute(
                 """
                 DELETE FROM sqlite_sequence
                 WHERE name = 'expenses'
                 """
             )
 
-            conn.commit()
+            await db.commit()
+
+            await cursor.close()
 
             return {
                 "status": "success",
@@ -361,11 +395,11 @@ def delete_all_expenses(
                 "deleted_count": deleted_count
             }
 
-    except sqlite3.Error as e:
+    except Exception as e:
 
         return {
             "status": "error",
-            "message": f"Database error: {str(e)}"
+            "message": str(e)
         }
 
 
@@ -374,7 +408,7 @@ def delete_all_expenses(
 # ============================================================
 
 @mcp.tool
-def delete_expense(
+async def delete_expense(
     expense_id: int
 ):
     """
@@ -383,9 +417,16 @@ def delete_expense(
 
     try:
 
-        with get_connection() as conn:
+        async with aiosqlite.connect(
+            DB_PATH,
+            timeout=10
+        ) as db:
 
-            cursor = conn.execute(
+            await db.execute(
+                "PRAGMA busy_timeout=10000;"
+            )
+
+            cursor = await db.execute(
                 """
                 DELETE FROM expenses
                 WHERE id = ?
@@ -395,6 +436,8 @@ def delete_expense(
 
             if cursor.rowcount == 0:
 
+                await cursor.close()
+
                 return {
                     "status": "error",
                     "message": (
@@ -403,20 +446,24 @@ def delete_expense(
                     )
                 }
 
-            conn.commit()
+            deleted_count = cursor.rowcount
+
+            await db.commit()
+
+            await cursor.close()
 
             return {
                 "status": "success",
                 "message": "Expense deleted successfully",
-                "deleted_count": cursor.rowcount,
+                "deleted_count": deleted_count,
                 "id": expense_id
             }
 
-    except sqlite3.Error as e:
+    except Exception as e:
 
         return {
             "status": "error",
-            "message": f"Database error: {str(e)}"
+            "message": str(e)
         }
 
 
@@ -425,7 +472,7 @@ def delete_expense(
 # ============================================================
 
 @mcp.tool
-def update_expense(
+async def update_expense(
     expense_id: int,
     date: str = None,
     amount: float = None,
@@ -443,27 +490,22 @@ def update_expense(
     params = []
 
     if date is not None:
-
         fields.append("date = ?")
         params.append(date)
 
     if amount is not None:
-
         fields.append("amount = ?")
         params.append(amount)
 
     if category is not None:
-
         fields.append("category = ?")
         params.append(category)
 
     if subcategory is not None:
-
         fields.append("subcategory = ?")
         params.append(subcategory)
 
     if description is not None:
-
         fields.append("description = ?")
         params.append(description)
 
@@ -484,14 +526,23 @@ def update_expense(
 
     try:
 
-        with get_connection() as conn:
+        async with aiosqlite.connect(
+            DB_PATH,
+            timeout=10
+        ) as db:
 
-            cursor = conn.execute(
+            await db.execute(
+                "PRAGMA busy_timeout=10000;"
+            )
+
+            cursor = await db.execute(
                 query,
                 params
             )
 
             if cursor.rowcount == 0:
+
+                await cursor.close()
 
                 return {
                     "status": "error",
@@ -501,20 +552,24 @@ def update_expense(
                     )
                 }
 
-            conn.commit()
+            updated_count = cursor.rowcount
+
+            await db.commit()
+
+            await cursor.close()
 
             return {
                 "status": "success",
                 "message": "Expense updated successfully",
-                "updated_count": cursor.rowcount,
+                "updated_count": updated_count,
                 "id": expense_id
             }
 
-    except sqlite3.Error as e:
+    except Exception as e:
 
         return {
             "status": "error",
-            "message": f"Database error: {str(e)}"
+            "message": str(e)
         }
 
 
@@ -523,47 +578,65 @@ def update_expense(
 # ============================================================
 
 @mcp.tool
-def database_status():
+async def database_status():
     """
-    Tests whether the SQLite database can actually be
-    created, opened, read and written.
+    Checks whether the SQLite database can be opened,
+    written to and read from.
     """
 
     try:
 
-        # Test database connection
-        with get_connection() as conn:
+        async with aiosqlite.connect(
+            DB_PATH,
+            timeout=10
+        ) as db:
 
-            # Test table creation
-            conn.execute("""
+            await db.execute(
+                "PRAGMA busy_timeout=10000;"
+            )
+
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS _write_test (
                     id INTEGER PRIMARY KEY
                 )
             """)
 
-            # Test actual INSERT
-            conn.execute(
+            await db.execute(
                 """
-                INSERT INTO _write_test (id)
+                INSERT OR REPLACE INTO _write_test (id)
                 VALUES (1)
                 """
             )
 
-            # Test DELETE
-            conn.execute(
+            await db.commit()
+
+            cursor = await db.execute(
+                """
+                SELECT id
+                FROM _write_test
+                WHERE id = 1
+                """
+            )
+
+            row = await cursor.fetchone()
+
+            await cursor.close()
+
+            await db.execute(
                 """
                 DELETE FROM _write_test
                 WHERE id = 1
                 """
             )
 
-            conn.commit()
+            await db.commit()
 
         return {
             "status": "success",
             "database_path": DB_PATH,
             "database_exists": os.path.exists(DB_PATH),
             "database_writable": True,
+            "database_readable": row is not None,
             "message": "SQLite read/write test passed"
         }
 
@@ -587,31 +660,45 @@ def database_status():
     "expense://categories",
     mime_type="application/json"
 )
-def get_categories():
+async def get_categories():
     """
-    Returns the categories.json file.
+    Returns categories and subcategories from categories.json.
     """
 
-    with open(
-        CATEGORIES_PATH,
-        "r",
-        encoding="utf-8"
-    ) as f:
+    # File reading is small, but using async-friendly file I/O
+    # is preferable in an async server.
+    loop = asyncio.get_running_loop()
 
-        return f.read()
+    def read_file():
+        with open(
+            CATEGORIES_PATH,
+            "r",
+            encoding="utf-8"
+        ) as f:
+            return f.read()
+
+    return await loop.run_in_executor(
+        None,
+        read_file
+    )
 
 
 # ============================================================
-# START MCP SERVER
+# START SERVER
 # ============================================================
 
 if __name__ == "__main__":
+
+    # Initialize the database before starting MCP.
+    asyncio.run(init_db())
 
     print("=" * 60)
     print("ExpenseTracker MCP Server")
     print("=" * 60)
     print(f"Database path: {DB_PATH}")
     print(f"Database exists: {os.path.exists(DB_PATH)}")
+    print("Database driver: aiosqlite")
+    print("SQLite journal mode: WAL")
     print("=" * 60)
 
     mcp.run()
